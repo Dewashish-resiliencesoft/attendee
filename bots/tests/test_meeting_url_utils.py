@@ -143,6 +143,8 @@ class TestMeetingUrlUtils(unittest.TestCase):
         self.assertEqual(meeting_type_from_url("https://MEET.GOOGLE.COM/ABC-DEFG-HIJ"), MeetingTypes.GOOGLE_MEET)
         self.assertEqual(meeting_type_from_url("https://meet.google.com/abc-defg-hij?authuser=0&pli=1"), MeetingTypes.GOOGLE_MEET)
         self.assertEqual(meeting_type_from_url("https://foo.meet.google.com/abc-defg-hij"), MeetingTypes.GOOGLE_MEET)
+        self.assertIsNone(meeting_type_from_url("https://meet.google.com.evil.com/abc-defg-hij"))
+        self.assertIsNone(meeting_type_from_url("https://evilmeet.google.com/abc-defg-hij"))
         self.assertEqual(normalize_meeting_url("https://MEET.GOOGLE.COM/ABC-DEFG-HIJ")[1], "https://meet.google.com/ABC-DEFG-HIJ")
         self.assertEqual(normalize_meeting_url("https://meet.google.com/abc-defg-hij?authuser=0")[1], "https://meet.google.com/abc-defg-hij")
         self.assertEqual(normalize_meeting_url("https://Foo.Meet.Google.com/abc-defg-hij?hs=1")[1], "https://meet.google.com/abc-defg-hij")

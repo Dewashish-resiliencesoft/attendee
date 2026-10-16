@@ -11,7 +11,10 @@ never captures the Meet canvas slower than that. A higher configured fps raises
 the capture rate instead of leaving 30 as a hidden cap.
 """
 
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 MEET_VIDEO_FPS = 30
 DEFAULT_VIDEO_FPS = 60
@@ -255,6 +258,45 @@ def install_aiortc_vpx_bitrate_ceiling(bitrate_bps):
         vpx.MIN_BITRATE = bitrate_bps
 
 
+def _cap_encoder_target_bitrate(encoder, bitrate_bps):
+    """Keep REMB from pushing this encoder above its own target.
+
+    aiortc's MAX_BITRATE is one process-wide number and this module only raises
+    it. A 60 fps session would otherwise leave the cap at 6 Mbps, and a later
+    30 fps Meet encoder would accept a REMB above its 3 Mbps target. The cap
+    lives on the instance. REMB assigns encoder.target_bitrate, so the setter
+    on that instance enforces it.
+    """
+    bitrate_bps = int(bitrate_bps)
+    install_aiortc_vpx_bitrate_ceiling(bitrate_bps)
+    encoder._webpage_streamer_bitrate_cap_bps = bitrate_bps
+
+    cls = type(encoder)
+    if getattr(cls, "_webpage_streamer_bitrate_capped", False):
+        return
+
+    capped = getattr(cls, "_webpage_streamer_capped_subclass", None)
+    if capped is None:
+        original_set = cls.target_bitrate.fset
+
+        def target_bitrate(self, bitrate):
+            cap = getattr(self, "_webpage_streamer_bitrate_cap_bps", None)
+            if cap is not None:
+                bitrate = min(int(bitrate), int(cap))
+            original_set(self, bitrate)
+
+        capped = type(
+            "WebpageStreamerVp8Encoder",
+            (cls,),
+            {
+                "target_bitrate": property(cls.target_bitrate.fget, target_bitrate),
+                "_webpage_streamer_bitrate_capped": True,
+            },
+        )
+        cls._webpage_streamer_capped_subclass = capped
+    encoder.__class__ = capped
+
+
 def _push_vpx_config(encoder):
     codec = getattr(encoder, "codec", None)
     cfg = getattr(encoder, "cfg", None)
@@ -266,21 +308,22 @@ def _push_vpx_config(encoder):
         return
     try:
         _vpx_assert(lib.vpx_codec_enc_config_set(codec, cfg))
-    except Exception:
-        return
+    except Exception as exc:
+        logger.warning("Could not push VP8 encoder config: %s", exc)
 
 
 def apply_vp8_encoder_settings(encoder, bitrate_bps, keyframe_interval_frames):
     """Override aiortc's 500 kbps / kf_max_dist=3000 defaults on one Vp8Encoder."""
     bitrate_bps = int(bitrate_bps)
     keyframe_interval_frames = int(keyframe_interval_frames)
-    install_aiortc_vpx_bitrate_ceiling(bitrate_bps)
     # The public setter is what REMB uses. It stores the bitrate aiortc later
     # copies into cfg.rc_target_bitrate. Objects without that setter (tests)
     # get the same private fields the setter writes.
     if hasattr(encoder, "target_bitrate"):
+        _cap_encoder_target_bitrate(encoder, bitrate_bps)
         encoder.target_bitrate = bitrate_bps
     else:
+        install_aiortc_vpx_bitrate_ceiling(bitrate_bps)
         private_bitrate = "_Vp8Encoder__target_bitrate"
         private_dirty = "_Vp8Encoder__update_config_needed"
         if hasattr(encoder, private_bitrate):

@@ -88,10 +88,9 @@ class GstVideoStreamTrack(MediaStreamTrack):
 
         rel_ns = pts_ns - self._base_pts_ns
 
-        # Reuse the same μs time base as audio for nice alignment
+        # PyAV's VideoFrame has time_base and pts, not rate.
         frame.time_base = Fraction(1, 1_000_000)
         frame.pts = rel_ns // 1_000
-        frame.rate = Fraction(self._framerate, 1)
 
         return frame
 

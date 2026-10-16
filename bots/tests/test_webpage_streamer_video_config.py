@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from bots.webpage_streamer_config import (
     DEFAULT_VIDEO_FRAME_SIZE,
+    _push_vpx_config,
     apply_vp8_encoder_settings,
     build_gstreamer_pipeline_description,
     capture_settings_from_offer,
@@ -415,6 +416,84 @@ class TestVideoBitrate(unittest.TestCase):
         finally:
             vpx.MAX_BITRATE = original_max
             vpx.MIN_BITRATE = original_min
+
+    def test_remb_stays_at_or_below_each_encoders_target(self):
+        from fractions import Fraction
+
+        import aiortc.codecs.vpx as vpx
+        from aiortc.codecs.vpx import Vp8Encoder
+        from av import VideoFrame
+
+        original_max = vpx.MAX_BITRATE
+        original_min = vpx.MIN_BITRATE
+        try:
+            vpx.MAX_BITRATE = 1_500_000
+            meet = Vp8Encoder()
+            zoom = Vp8Encoder()
+            apply_vp8_encoder_settings(meet, 3_000_000, 60)
+            apply_vp8_encoder_settings(zoom, 6_000_000, 120)
+            # The process-wide ceiling follows the higher session. REMB still
+            # has to stop at each encoder's own target.
+            self.assertGreaterEqual(vpx.MAX_BITRATE, 6_000_000)
+            meet.target_bitrate = 8_000_000
+            zoom.target_bitrate = 8_000_000
+
+            frame = VideoFrame(160, 120, "yuv420p")
+            frame.pts = 0
+            frame.time_base = Fraction(1, 90000)
+            meet.encode(frame, False)
+            zoom.encode(frame, False)
+
+            self.assertEqual(meet.target_bitrate, 3_000_000)
+            self.assertEqual(meet.cfg.rc_target_bitrate, 3000)
+            self.assertEqual(zoom.target_bitrate, 6_000_000)
+            self.assertEqual(zoom.cfg.rc_target_bitrate, 6000)
+        finally:
+            vpx.MAX_BITRATE = original_max
+            vpx.MIN_BITRATE = original_min
+
+    def test_push_vpx_config_logs_a_warning(self):
+        class Cfg:
+            kf_max_dist = 3000
+
+        class Encoder:
+            codec = object()
+            cfg = Cfg()
+
+        with self.assertLogs("bots.webpage_streamer_config", level="WARNING") as captured:
+            _push_vpx_config(Encoder())
+        self.assertTrue(any("VP8 encoder config" in line for line in captured.output))
+
+    def test_video_track_recv_returns_a_real_frame(self):
+        import asyncio
+        from fractions import Fraction
+
+        from bots.webpage_streamer.webpage_streamer import Gst, GstVideoStreamTrack
+
+        width, height, fps = 64, 48, 30
+        y_size = width * height
+        uv_size = y_size // 4
+        payload = bytes([16]) * y_size + bytes([128]) * uv_size + bytes([90]) * uv_size
+        buffer = Gst.Buffer.new_allocate(None, len(payload), None)
+        buffer.fill(0, payload)
+        buffer.pts = 5_000_000_000
+
+        class Sink:
+            def emit(self, signal):
+                self.signal = signal
+                return Gst.Sample.new(buffer, None, None, None)
+
+        sink = Sink()
+        track = GstVideoStreamTrack(sink, width, height, fps)
+        frame = asyncio.run(track.recv())
+
+        self.assertEqual(sink.signal, "pull-sample")
+        self.assertEqual(frame.width, width)
+        self.assertEqual(frame.height, height)
+        self.assertEqual(frame.format.name, "yuv420p")
+        self.assertEqual(frame.time_base, Fraction(1, 1_000_000))
+        self.assertEqual(frame.pts, 0)
+        self.assertEqual(bytes(frame.planes[0])[:4], b"\x10\x10\x10\x10")
 
     def test_bitrate_override_is_forwarded_to_the_pod(self):
         with patch.dict(os.environ, {"WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS": "4500"}):
