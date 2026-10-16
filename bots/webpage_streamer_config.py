@@ -235,15 +235,23 @@ def capture_settings_from_offer(params, frame_size, fps, environ=None):
     return frame_size, resolved_fps
 
 
-def _raise_vpx_bitrate_ceiling(bitrate_bps):
-    """aiortc clamps target_bitrate to MAX_BITRATE (vpx.py:17, applied at vpx.py:372)."""
+def install_aiortc_vpx_bitrate_ceiling(bitrate_bps):
+    """Raise aiortc's VP8 bitrate cap before any encoder or REMB update.
+
+    aiortc 1.10.1 src/aiortc/codecs/vpx.py:17 sets MAX_BITRATE = 1500000.
+    Vp8Encoder.target_bitrate (vpx.py:372) clamps every assignment to that cap,
+    including REMB from RTCRtpSender (rtcrtpsender.py:278). The next encode
+    copies the clamped value into cfg.rc_target_bitrate (vpx.py:394) and passes
+    it to libvpx. Patch the module global here. Do not fork or vendor aiortc.
+    """
     try:
         import aiortc.codecs.vpx as vpx
     except ImportError:
         return
+    bitrate_bps = int(bitrate_bps)
     if bitrate_bps > vpx.MAX_BITRATE:
         vpx.MAX_BITRATE = bitrate_bps
-    if bitrate_bps < vpx.MIN_BITRATE:
+    if 0 < bitrate_bps < vpx.MIN_BITRATE:
         vpx.MIN_BITRATE = bitrate_bps
 
 
@@ -266,22 +274,29 @@ def apply_vp8_encoder_settings(encoder, bitrate_bps, keyframe_interval_frames):
     """Override aiortc's 500 kbps / kf_max_dist=3000 defaults on one Vp8Encoder."""
     bitrate_bps = int(bitrate_bps)
     keyframe_interval_frames = int(keyframe_interval_frames)
-    _raise_vpx_bitrate_ceiling(bitrate_bps)
-    private_bitrate = "_Vp8Encoder__target_bitrate"
-    private_dirty = "_Vp8Encoder__update_config_needed"
-    if hasattr(encoder, private_bitrate):
-        setattr(encoder, private_bitrate, bitrate_bps)
-    if hasattr(encoder, private_dirty):
-        setattr(encoder, private_dirty, True)
+    install_aiortc_vpx_bitrate_ceiling(bitrate_bps)
+    # The public setter is what REMB uses. It stores the bitrate aiortc later
+    # copies into cfg.rc_target_bitrate. Objects without that setter (tests)
+    # get the same private fields the setter writes.
+    if hasattr(encoder, "target_bitrate"):
+        encoder.target_bitrate = bitrate_bps
+    else:
+        private_bitrate = "_Vp8Encoder__target_bitrate"
+        private_dirty = "_Vp8Encoder__update_config_needed"
+        if hasattr(encoder, private_bitrate):
+            setattr(encoder, private_bitrate, bitrate_bps)
+        if hasattr(encoder, private_dirty):
+            setattr(encoder, private_dirty, True)
 
     original_encode = encoder.encode
 
     def encode(frame, force_keyframe=False):
         payloads, timestamp = original_encode(frame, force_keyframe)
         cfg = getattr(encoder, "cfg", None)
+        # encode() hardcodes kf_max_dist = 3000 before init. Fix that only.
+        # rc_target_bitrate stays whatever Vp8Encoder.__update_config wrote.
         if cfg is not None and getattr(cfg, "kf_max_dist", None) != keyframe_interval_frames:
             cfg.kf_max_dist = keyframe_interval_frames
-            cfg.rc_target_bitrate = max(1, bitrate_bps // 1000)
             _push_vpx_config(encoder)
         return payloads, timestamp
 

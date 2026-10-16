@@ -374,6 +374,48 @@ class TestVideoBitrate(unittest.TestCase):
         self.assertEqual(encoder.cfg.kf_max_dist, 60)
         self.assertEqual(encoder.cfg.rc_target_bitrate, 3000)
 
+    def test_1080p60_encoder_bitrate_exceeds_aiortc_cap(self):
+        """Read the bitrate libvpx was given, not the number we stored beforehand."""
+        from fractions import Fraction
+
+        import aiortc.codecs.vpx as vpx
+        from aiortc.codecs.vpx import Vp8Encoder
+        from av import VideoFrame
+
+        from bots.webpage_streamer.webpage_streamer import WebpageStreamer
+
+        original_max = vpx.MAX_BITRATE
+        original_min = vpx.MIN_BITRATE
+        try:
+            vpx.MAX_BITRATE = 1_500_000
+            bitrate_bps = default_video_bitrate_kbps(1920, 1080, 60) * 1000
+            self.assertGreater(bitrate_bps, 1_500_000)
+
+            stock = Vp8Encoder()
+            stock.target_bitrate = bitrate_bps
+            self.assertEqual(stock.target_bitrate, 1_500_000)
+
+            WebpageStreamer(video_frame_size=(1920, 1080), video_fps=60)
+            self.assertGreaterEqual(vpx.MAX_BITRATE, bitrate_bps)
+
+            encoder = Vp8Encoder()
+            apply_vp8_encoder_settings(encoder, bitrate_bps, video_keyframe_interval_frames(60))
+            frame = VideoFrame(1920, 1080, "yuv420p")
+            frame.pts = 0
+            frame.time_base = Fraction(1, 90000)
+            encoder.encode(frame, False)
+            # REMB assigns this setter after the encoder exists (rtcrtpsender.py:278).
+            encoder.target_bitrate = bitrate_bps
+            frame.pts = 3000
+            encoder.encode(frame, False)
+
+            self.assertEqual(encoder.target_bitrate, bitrate_bps)
+            self.assertEqual(encoder.cfg.rc_target_bitrate, bitrate_bps // 1000)
+            self.assertGreater(encoder.cfg.rc_target_bitrate, 1500)
+        finally:
+            vpx.MAX_BITRATE = original_max
+            vpx.MIN_BITRATE = original_min
+
     def test_bitrate_override_is_forwarded_to_the_pod(self):
         with patch.dict(os.environ, {"WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS": "4500"}):
             env_vars = dict(webpage_streamer_env_vars(platform="zoom"))

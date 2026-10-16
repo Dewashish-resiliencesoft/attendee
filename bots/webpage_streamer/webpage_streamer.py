@@ -23,6 +23,7 @@ from bots.webpage_streamer_config import (
     build_gstreamer_pipeline_description,
     capture_settings_from_offer,
     default_fps_for_platform,
+    install_aiortc_vpx_bitrate_ceiling,
     resolve_video_bitrate_kbps,
     video_keyframe_interval_frames,
 )
@@ -162,6 +163,8 @@ class WebpageStreamer:
         self.driver = None
         self.video_frame_size = video_frame_size
         self.video_fps = default_fps_for_platform("local") if video_fps is None else video_fps
+        # Before any peer connection, so REMB cannot clamp the encoder to 1.5 Mbps.
+        self._install_vpx_bitrate_ceiling()
         self.display_var_for_recording = None
         self.display = None
         self.last_keepalive_time = None
@@ -225,11 +228,17 @@ class WebpageStreamer:
         frame_size, fps = capture_settings_from_offer(params, self.video_frame_size, self.video_fps)
         self.video_frame_size = frame_size
         self.video_fps = fps
+        self._install_vpx_bitrate_ceiling()
+
+    def _install_vpx_bitrate_ceiling(self):
+        width, height = self.video_frame_size
+        install_aiortc_vpx_bitrate_ceiling(resolve_video_bitrate_kbps(width, height, self.video_fps) * 1000)
 
     def _install_vp8_encoder_settings(self):
         """Point aiortc's VP8 encoder at the bitrate and keyframe interval for this capture."""
         import aiortc.rtcrtpsender as sender_mod
 
+        self._install_vpx_bitrate_ceiling()
         width, height = self.video_frame_size
         bitrate_bps = resolve_video_bitrate_kbps(width, height, self.video_fps) * 1000
         keyframe_interval_frames = video_keyframe_interval_frames(self.video_fps)
