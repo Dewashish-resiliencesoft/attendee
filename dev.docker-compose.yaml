@@ -10,6 +10,9 @@ services:
       - REDIS_URL=redis://redis:6379/5
       - DJANGO_SETTINGS_MODULE=attendee.settings.development
       - ENABLE_CHROME_SANDBOX=false
+      # Empty unless set in .env. Unset keeps the per-platform default (Meet 30fps, Zoom/Teams 60fps).
+      - WEBPAGE_STREAMER_VIDEO_FRAME_SIZE=${WEBPAGE_STREAMER_VIDEO_FRAME_SIZE:-}
+      - WEBPAGE_STREAMER_VIDEO_FPS=${WEBPAGE_STREAMER_VIDEO_FPS:-}
     command: "celery -A attendee worker -l INFO"
 
   attendee-scheduler-local:
@@ -22,6 +25,8 @@ services:
       - POSTGRES_HOST=postgres
       - REDIS_URL=redis://redis:6379/5
       - DJANGO_SETTINGS_MODULE=attendee.settings.development
+      - WEBPAGE_STREAMER_VIDEO_FRAME_SIZE=${WEBPAGE_STREAMER_VIDEO_FRAME_SIZE:-}
+      - WEBPAGE_STREAMER_VIDEO_FPS=${WEBPAGE_STREAMER_VIDEO_FPS:-}
     command: "python manage.py run_scheduler"
     entrypoint: []
 
@@ -37,6 +42,8 @@ services:
       - POSTGRES_HOST=postgres
       - REDIS_URL=redis://redis:6379/5
       - DJANGO_SETTINGS_MODULE=attendee.settings.development
+      - WEBPAGE_STREAMER_VIDEO_FRAME_SIZE=${WEBPAGE_STREAMER_VIDEO_FRAME_SIZE:-}
+      - WEBPAGE_STREAMER_VIDEO_FPS=${WEBPAGE_STREAMER_VIDEO_FPS:-}
     command: python manage.py runserver 0.0.0.0:8000
     entrypoint: []
 
@@ -51,6 +58,13 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=attendee.settings.development
       - ENABLE_CHROME_SANDBOX=true
+      # Unset size/fps fall through to the local default: 1920x1080 @ 60fps.
+      # Set WEBPAGE_STREAMER_VIDEO_FRAME_SIZE / WEBPAGE_STREAMER_VIDEO_FPS to override.
+      - WEBPAGE_STREAMER_VIDEO_FRAME_SIZE=${WEBPAGE_STREAMER_VIDEO_FRAME_SIZE:-}
+      - WEBPAGE_STREAMER_VIDEO_FPS=${WEBPAGE_STREAMER_VIDEO_FPS:-}
+    # 1080p60 capture needs more than the Kubernetes pod's 1 CPU request.
+    cpus: "4"
+    mem_limit: 8g
     command: "python bots/webpage_streamer/run_webpage_streamer.py"
     security_opt:
       - seccomp=./bots/web_bot_adapter/chrome_seccomp.json

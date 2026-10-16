@@ -118,6 +118,29 @@ For more details, follow [this guide](https://developers.zoom.us/docs/meeting-sd
 - Paste the link into your browser to confirm your account.
 - You should now be able to log in, input your credentials and obtain an API key. API calls should be directed to http://localhost:8000 instead of https://app.attendee.dev.
 
+### Webpage streamer resolution and frame rate
+
+The webpage streamer (voice-agent / screen-share capture) picks a default from the meeting platform:
+
+| Platform | Frame size | Frame rate |
+| --- | --- | --- |
+| Google Meet | 1920x1080 | 30 fps |
+| Zoom | 1920x1080 | 60 fps |
+| Microsoft Teams | 1920x1080 | 60 fps |
+| Local / test (no meeting platform) | 1920x1080 | 60 fps |
+
+`WEBPAGE_STREAMER_VIDEO_FRAME_SIZE` and `WEBPAGE_STREAMER_VIDEO_FPS` override those defaults. See `.env.webpage-streamer.example`.
+
+Google Meet limits screen share to about 30 fps for viewers, so a faster capture does not raise what Meet participants see.
+
+The local streamer service in `dev.docker-compose.yaml` is the local/test case (1920x1080 @ 60 fps) and is given 4 CPUs and 8g of memory. To pin those values explicitly, including on the meeting bot:
+
+```bash
+docker compose -f dev.docker-compose.yaml -f dev.docker-compose.1080p60.yaml --profile webpage-streamer up
+```
+
+On Kubernetes the streamer container still requests 1 CPU and limits memory to 4Gi unless you set `WEBPAGE_STREAMING_CPU_REQUEST` (and optionally `WEBPAGE_STREAMING_CPU_LIMIT`) and `WEBPAGE_STREAMING_MEMORY_LIMIT`. Use 4 CPUs and 8Gi for 1080p.
+
 
 ## Running in production
 

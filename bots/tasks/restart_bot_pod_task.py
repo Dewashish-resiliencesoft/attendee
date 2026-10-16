@@ -80,7 +80,10 @@ def restart_bot_pod(self, bot_id):
     bot.last_heartbeat_timestamp = None
     bot.save()
 
+    from bots.meeting_url_utils import meeting_type_from_url
+
     bot_pod_creator = BotPodCreator()
+    meeting_type = meeting_type_from_url(bot.meeting_url)
     bot_pod_create_result = bot_pod_creator.create_bot_pod(
         bot_id=bot.id,
         bot_name=bot.k8s_pod_name(),
@@ -88,6 +91,7 @@ def restart_bot_pod(self, bot_id):
         add_webpage_streamer=bot.should_launch_webpage_streamer(),
         add_persistent_storage=bot.reserve_additional_storage(),
         bot_pod_spec_type=bot.bot_pod_spec_type,
+        webpage_streamer_platform=meeting_type or "local",
     )
 
     logger.info(f"Bot pod create result: {bot_pod_create_result}")

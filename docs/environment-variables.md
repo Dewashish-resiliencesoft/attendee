@@ -166,6 +166,13 @@ This document lists all supported environment variables for the Attendee applica
 | `INTERNAL_SITE_DOMAIN` | String | (None) | Internal host (and optional port) that bot pods use for callbacks to the app, e.g. `attendee-app.<namespace>.svc.cluster.local:8000`. When set, in-cluster bot callbacks target it over HTTP, bypassing the public ingress (useful when bot pods are restricted by a NetworkPolicy). When unset, callbacks fall back to `EXTERNAL_WEBHOOK_SITE_DOMAIN` / `SITE_DOMAIN`. |
 | `USE_SECURE_COOKIE_FOR_SIGNED_IN_GOOGLE_MEET_BOTS` | Boolean | `true` | Add the Secure flag to the Google Meet SSO sign-in session cookie. Set to `false` when the Google Meet sign-in flow navigates over an HTTP url. |
 | `WEBPAGE_STREAMER_POD_NAMESPACE` | String | `attendee-webpage-streamer` | Kubernetes namespace for webpage streamer pods. |
+| `WEBPAGE_STREAMER_VIDEO_FRAME_SIZE` | String | Platform default `1920x1080` | Webpage streamer capture size, `WIDTHxHEIGHT`. Overrides the per-platform default. Width and height must be positive even integers. |
+| `WEBPAGE_STREAMER_VIDEO_FPS` | Integer | Platform default: Google Meet `30`, Zoom / Teams / local `60` | Webpage streamer capture frame rate. Overrides the per-platform default. Google Meet still shows screen share to viewers at about 30 fps. |
+| `WEBPAGE_STREAMER_PLATFORM` | String | `local` | Platform used to pick the size/fps default when the bot's meeting URL is not available (`google_meet`, `zoom`, `teams`, `local`). |
+| `WEBPAGE_STREAMING_CPU_REQUEST` | String | `1` | Kubernetes CPU request for the webpage streamer container. Raise this (for example to `4`) for 1920x1080 at 30 or 60 fps. |
+| `WEBPAGE_STREAMING_CPU_LIMIT` | String | (None) | Optional Kubernetes CPU limit for the webpage streamer container. Unset means no CPU limit. |
+| `WEBPAGE_STREAMING_MEMORY_REQUEST` | String | `4Gi` | Kubernetes memory request for the webpage streamer container. |
+| `WEBPAGE_STREAMING_MEMORY_LIMIT` | String | `4Gi` | Kubernetes memory limit for the webpage streamer container. 1080p capture often needs `8Gi`. |
 | `CHARGE_CREDITS_FOR_BOTS` | Boolean | `false` | Enable credit charging for bot operations. |
 | `CUSTOM_BOT_POD_SPEC_TYPES` | String | (Empty) | Comma-separated list of custom bot pod specification types. |
 | `ENFORCE_DOMAIN_ALLOWLIST_IN_CHROME` | Boolean | `false` | Enforce domain allowlist in Chrome web bot. |

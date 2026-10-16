@@ -64,7 +64,7 @@ In order to bring your voice agent into a meeting, Attendee will launch a contai
 
 2. Your webpage should immediately ask the user for permission to use the microphone. The Attendee container will grant the microphone permission automatically. The webpage must not require the user to click a button to start the call. 
 
-3. The Attendee container will load your webpage with screen dimensions of 1280x720, so your webpage should be designed for display at that size.
+3. The Attendee container loads your webpage at 1920x1080 by default (override with `WEBPAGE_STREAMER_VIDEO_FRAME_SIZE`). Capture is 30 fps for Google Meet and 60 fps for Zoom, Microsoft Teams, and local/test runs (override with `WEBPAGE_STREAMER_VIDEO_FPS`). Google Meet still limits screen share to about 30 fps for viewers. Design the page for the size you configure.
 
 4. Pass any references to objects in your system (IE agent_id) via query parameters in the webpage URL.
 

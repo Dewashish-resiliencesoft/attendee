@@ -10,6 +10,8 @@ import jsonpatch
 from django.conf import settings
 from kubernetes import client, config
 
+from bots.webpage_streamer_config import webpage_streamer_cli_args, webpage_streamer_env_vars, webpage_streaming_cpu_request, webpage_streaming_resource_limits
+
 from .bot_pod_spec import BotPodSpecType
 
 logger = logging.getLogger(__name__)
@@ -206,26 +208,29 @@ class BotPodCreator:
             client.V1VolumeMount(name="home", mount_path="/home/app"),
         ]
 
+    def _webpage_streamer_platform(self):
+        return getattr(self, "webpage_streamer_platform", None)
+
+    def _webpage_streamer_env(self):
+        return [client.V1EnvVar(name=name, value=value) for name, value in webpage_streamer_env_vars(platform=self._webpage_streamer_platform())]
+
     def get_webpage_streamer_container(self):
-        args = ["python", "bots/webpage_streamer/run_webpage_streamer.py", "--video-frame-size", os.getenv("WEBPAGE_STREAMER_VIDEO_FRAME_SIZE", "1280x720")]
         return client.V1Container(
                 name="webpage-streamer",
                 image=self.image,
                 image_pull_policy=os.getenv("WEBPAGE_STREAMER_POD_IMAGE_PULL_POLICY", "Always"),
-                args=args,
+                args=webpage_streamer_cli_args(platform=self._webpage_streamer_platform()),
                 resources=client.V1ResourceRequirements(
                     requests={
-                        "cpu": os.getenv("WEBPAGE_STREAMING_CPU_REQUEST", "1"),
+                        "cpu": webpage_streaming_cpu_request(),
                         "memory": os.getenv("WEBPAGE_STREAMING_MEMORY_REQUEST", "4Gi"),
                         "ephemeral-storage": os.getenv("WEBPAGE_STREAMING_EPHEMERAL_STORAGE_REQUEST", "0.5Gi")
                     },
-                    limits={
-                        "memory": os.getenv("WEBPAGE_STREAMING_MEMORY_LIMIT", "4Gi"),
-                        "ephemeral-storage": os.getenv("WEBPAGE_STREAMING_EPHEMERAL_STORAGE_LIMIT", "0.5Gi")
-                    }
+                    limits=webpage_streaming_resource_limits(),
                 ),
                 env=[
                     client.V1EnvVar(name="ENABLE_CHROME_SANDBOX_FOR_WEBPAGE_STREAMER", value=os.getenv("ENABLE_CHROME_SANDBOX_FOR_WEBPAGE_STREAMER", "true")),
+                    *self._webpage_streamer_env(),
                 ],
                 security_context = self.get_webpage_streamer_container_security_context(),
                 volume_mounts=self.get_webpage_streamer_volume_mounts()
@@ -272,6 +277,8 @@ class BotPodCreator:
                         env=[
                             # Env var so that the bot pod can know that it is a bot pod
                             client.V1EnvVar(name="IS_A_BOT_POD", value="true"),
+                            # Same resolved size/fps as the streamer so the meeting canvas is not a lower cap.
+                            *self._webpage_streamer_env(),
                         ],
                         security_context = self.get_bot_container_security_context(),
                         volume_mounts=self.get_bot_container_volume_mounts(),
@@ -342,6 +349,7 @@ class BotPodCreator:
         add_webpage_streamer: Optional[bool] = False,
         add_persistent_storage: Optional[bool] = False,
         bot_pod_spec_type: Optional[str] = BotPodSpecType.DEFAULT,
+        webpage_streamer_platform: Optional[str] = None,
     ) -> Dict:
         """
         Create a bot pod with configuration from environment.
@@ -352,6 +360,7 @@ class BotPodCreator:
             bot_cpu_request: Optional CPU request override for the bot
             add_webpage_streamer: Whether to create a webpage streamer pod
             add_persistent_storage: Whether to add persistent storage to the bot pod
+            webpage_streamer_platform: Meeting platform (google_meet, zoom, teams, or local). Selects the default frame size and fps unless WEBPAGE_STREAMER_VIDEO_FRAME_SIZE / WEBPAGE_STREAMER_VIDEO_FPS are set.
             bot_pod_spec_type: Name of the bot pod spec to use (e.g. DEFAULT, SCHEDULED, or any custom name).
                               Will look up BOT_POD_SPEC_{name} from environment variables.
         """
@@ -361,6 +370,7 @@ class BotPodCreator:
         self.bot_id = bot_id
         self.bot_cpu_request = bot_cpu_request
         self.add_persistent_storage = add_persistent_storage
+        self.webpage_streamer_platform = webpage_streamer_platform
 
         # Fetch bot pod spec from the bot_pod_spec_type passed in. Fall back to BotPodSpecType.DEFAULT if the type in the argument is not defined.
         self.bot_pod_spec = fetch_bot_pod_spec(bot_pod_spec_type) or fetch_bot_pod_spec(BotPodSpecType.DEFAULT)

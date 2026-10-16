@@ -14,9 +14,12 @@ def launch_bot(bot):
     # which spins up a new pod for the bot
     logger.info(f"Launching bot {bot.object_id} ({bot.id}) with method {os.getenv('LAUNCH_BOT_METHOD', 'celery')}")
     if os.getenv("LAUNCH_BOT_METHOD") == "kubernetes":
+        from bots.meeting_url_utils import meeting_type_from_url
+
         from .bot_pod_creator import BotPodCreator
 
         bot_pod_creator = BotPodCreator()
+        meeting_type = meeting_type_from_url(bot.meeting_url)
         create_pod_result = bot_pod_creator.create_bot_pod(
             bot_id=bot.id,
             bot_name=bot.k8s_pod_name(),
@@ -24,6 +27,7 @@ def launch_bot(bot):
             add_webpage_streamer=bot.should_launch_webpage_streamer(),
             add_persistent_storage=bot.reserve_additional_storage(),
             bot_pod_spec_type=bot.bot_pod_spec_type,
+            webpage_streamer_platform=meeting_type or "local",
         )
         logger.info(f"Bot {bot.object_id} ({bot.id}) launched via Kubernetes: {create_pod_result}")
         if not create_pod_result.get("created"):

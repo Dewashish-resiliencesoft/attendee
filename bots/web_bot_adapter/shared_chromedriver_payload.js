@@ -32,7 +32,10 @@ class BotVideoOutputStream {
         this.canvasCtx.fillStyle = "black";
         this.canvasCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        const sourceVideoStream = this.canvas.captureStream(30); // NEEDS to be 30 or Google Meet complains
+        // At least 30 on Google Meet (Meet rejects slower tracks). Raised when the
+        // streamer fps is higher so this is not a hidden cap. Injected per platform.
+        const captureFps = (window.initialData && Number(window.initialData.webpageStreamerCaptureFps)) || 30;
+        const sourceVideoStream = this.canvas.captureStream(captureFps);
 
         // This is our *source* video track; we will CLONE it for callers.
         const videoTracks = sourceVideoStream.getVideoTracks();
@@ -289,11 +292,14 @@ class BotVideoOutputStream {
 
 
 
-    _startVideoDrawingLoop() {
+    _startVideoDrawingLoop(framerate) {
         if (!this.videoElement) return;
 
         let lastDrawTime = 0;
-        const drawInterval = 1000 / 15; // ~15fps (60fps / 4)
+        // Uploaded-video playback stays at 15fps. The webpage streamer passes its configured fps.
+        const DEFAULT_UPLOADED_VIDEO_DRAW_FPS = 15;
+        const fps = framerate > 0 ? framerate : DEFAULT_UPLOADED_VIDEO_DRAW_FPS;
+        const drawInterval = 1000 / fps;
 
         const drawFrame = (timestamp) => {
             if (
@@ -305,7 +311,7 @@ class BotVideoOutputStream {
                 return;
             }
 
-            // Only draw if enough time has passed (throttle to 1/3 of normal rate)
+            // Only draw if enough time has passed for the requested frame rate.
             if (timestamp - lastDrawTime >= drawInterval) {
                 // Resize canvas on first valid frame
                 const vw = this.videoElement.videoWidth;
@@ -445,7 +451,8 @@ class BotVideoOutputStream {
             this.ensureInputOn();
             this.ensureMicOn();
 
-            this._startVideoDrawingLoop();
+            const streamerFps = (window.initialData && Number(window.initialData.webpageStreamerVideoFps)) || 60;
+            this._startVideoDrawingLoop(streamerFps);
         }
         catch (e) {
             window.ws.sendJson({

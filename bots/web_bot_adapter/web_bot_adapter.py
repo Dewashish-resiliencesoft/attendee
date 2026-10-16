@@ -24,11 +24,13 @@ from websockets.sync.server import serve
 from bots.automatic_leave_configuration import AutomaticLeaveConfiguration
 from bots.automatic_leave_utils import participant_is_another_bot
 from bots.bot_adapter import BotAdapter
+from bots.meeting_url_utils import meeting_type_from_url
 from bots.models import ParticipantEventTypes, RecordingViews
 from bots.per_participant_realtime_video_configuration import PerParticipantRealtimeVideoConfiguration
 from bots.room_sync_source_participant_configuration import RoomSyncSourceParticipantConfiguration
 from bots.room_sync_utils import add_bot_indicator_to_display_name
 from bots.utils import half_ceil, mask_url_query_param_values, scale_i420
+from bots.webpage_streamer_config import initial_data_webpage_streamer_js_fields
 
 from .debug_screen_recorder import DebugScreenRecorder
 from .livekit_websocket_bridge import LiveKitWebsocketBridge
@@ -825,7 +827,8 @@ class WebBotAdapter(BotAdapter):
         self.start_domain_allow_list_listener()
         logger.info(f"web driver server initialized at port {self.driver.service.port}")
 
-        initial_data_code = f"window.initialData = {{websocketPort: {self.websocket_port}, videoFrameWidth: {self.video_frame_size[0]}, videoFrameHeight: {self.video_frame_size[1]}, botName: {json.dumps(self.display_name)}, addClickRipple: {'true' if self.should_create_debug_recording else 'false'}, recordingView: '{self.recording_view}', sendMixedAudio: {'true' if self.add_mixed_audio_chunk_callback else 'false'}, sendPerParticipantAudio: {'true' if self.add_audio_chunk_callback else 'false'}, perParticipantRealtimeVideoConfiguration: {json.dumps(self.per_participant_realtime_video_configuration.to_dict())}, roomSyncSourceParticipantConfiguration: {json.dumps(self.room_sync_source_participant_configuration.to_dict()) if self.room_sync_source_participant_configuration else 'null'}, sendPerParticipantVideo: {'true' if self.add_per_participant_video_frame_callback else 'false'}, collectCaptions: {'true' if self.upsert_caption_callback else 'false'}, recordParticipantSpeechStartStopEvents: {'true' if self.record_participant_speech_start_stop_events else 'false'}}}"
+        webpage_streamer_platform = meeting_type_from_url(self.meeting_url) or "local"
+        initial_data_code = f"window.initialData = {{websocketPort: {self.websocket_port}, videoFrameWidth: {self.video_frame_size[0]}, videoFrameHeight: {self.video_frame_size[1]}, {initial_data_webpage_streamer_js_fields(platform=webpage_streamer_platform)}, botName: {json.dumps(self.display_name)}, addClickRipple: {'true' if self.should_create_debug_recording else 'false'}, recordingView: '{self.recording_view}', sendMixedAudio: {'true' if self.add_mixed_audio_chunk_callback else 'false'}, sendPerParticipantAudio: {'true' if self.add_audio_chunk_callback else 'false'}, perParticipantRealtimeVideoConfiguration: {json.dumps(self.per_participant_realtime_video_configuration.to_dict())}, roomSyncSourceParticipantConfiguration: {json.dumps(self.room_sync_source_participant_configuration.to_dict()) if self.room_sync_source_participant_configuration else 'null'}, sendPerParticipantVideo: {'true' if self.add_per_participant_video_frame_callback else 'false'}, collectCaptions: {'true' if self.upsert_caption_callback else 'false'}, recordParticipantSpeechStartStopEvents: {'true' if self.record_participant_speech_start_stop_events else 'false'}}}"
 
         # Get directory of current file
         current_dir = os.path.dirname(os.path.abspath(__file__))

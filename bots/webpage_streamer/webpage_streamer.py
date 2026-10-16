@@ -18,6 +18,8 @@ from aiortc.contrib.media import MediaRelay
 from av import AudioFrame, VideoFrame
 from pyvirtualdisplay import Display
 
+from bots.webpage_streamer_config import build_gstreamer_pipeline_description, default_fps_for_platform
+
 gi.require_version("Gst", "1.0")
 gi.require_version("GstApp", "1.0")
 from gi.repository import Gst, GstApp
@@ -30,7 +32,7 @@ os.environ["PULSE_LATENCY_MSEC"] = "20"
 class GstVideoStreamTrack(MediaStreamTrack):
     kind = "video"
 
-    def __init__(self, sink, width, height, framerate=15):
+    def __init__(self, sink, width, height, framerate):
         super().__init__()
         self._sink = sink
         self._width = width
@@ -81,6 +83,7 @@ class GstVideoStreamTrack(MediaStreamTrack):
         # Reuse the same μs time base as audio for nice alignment
         frame.time_base = Fraction(1, 1_000_000)
         frame.pts = rel_ns // 1_000
+        frame.rate = Fraction(self._framerate, 1)
 
         return frame
 
@@ -147,9 +150,11 @@ class WebpageStreamer:
     def __init__(
         self,
         video_frame_size,
+        video_fps=None,
     ):
         self.driver = None
         self.video_frame_size = video_frame_size
+        self.video_fps = default_fps_for_platform("local") if video_fps is None else video_fps
         self.display_var_for_recording = None
         self.display = None
         self.last_keepalive_time = None
@@ -169,21 +174,12 @@ class WebpageStreamer:
         width, height = self.video_frame_size
         display_var = self.display_var_for_recording
 
-        pipeline_desc = f"""
-            ximagesrc display-name={display_var} use-damage=0 show-pointer=false
-                ! video/x-raw,framerate=15/1,width={width},height={height}
-                ! videoconvert
-                ! video/x-raw,format=I420,width={width},height={height}
-                ! queue max-size-buffers=5 max-size-time=0 leaky=downstream
-                ! appsink name=video_sink emit-signals=false max-buffers=1 drop=true
-
-            alsasrc device=default
-                ! audio/x-raw,format=S16LE,channels=1,rate=16000
-                ! audioconvert
-                ! audioresample
-                ! queue max-size-buffers=8000 leaky=downstream
-                ! appsink name=audio_sink emit-signals=false max-buffers=8000 drop=true
-        """
+        pipeline_desc = build_gstreamer_pipeline_description(
+            display_var=display_var,
+            width=width,
+            height=height,
+            framerate=self.video_fps,
+        )
 
         logger.info("Starting GStreamer capture pipeline")
         self._gst_pipeline = Gst.parse_launch(pipeline_desc)
@@ -205,7 +201,7 @@ class WebpageStreamer:
             sink=self._gst_video_sink,
             width=width,
             height=height,
-            framerate=15,
+            framerate=self.video_fps,
         )
         self._audio_track = GstAudioStreamTrack(
             sink=self._gst_audio_sink,
@@ -253,7 +249,7 @@ class WebpageStreamer:
             logger.info("Chrome sandboxing is disabled")
         else:
             logger.info("Chrome sandboxing is enabled")
-        logger.info(f"Video frame size: {self.video_frame_size}")
+        logger.info(f"Video frame size: {self.video_frame_size} fps: {self.video_fps}")
 
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
 
