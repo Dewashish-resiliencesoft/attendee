@@ -133,10 +133,10 @@ The webpage streamer (voice-agent / screen-share capture) picks a default from t
 
 Google Meet limits screen share to about 30 fps for viewers, so a faster capture does not raise what Meet participants see.
 
-The local streamer service in `dev.docker-compose.yaml` is the local/test case (1920x1080 @ 60 fps) and is given 4 CPUs and 8g of memory. To pin those values explicitly, including on the meeting bot:
+The local streamer service in `dev.docker-compose.yaml` is the local/test case (1920x1080, 60 fps) and is given 4 CPUs and 8g of memory. To pin 1920x1080 on the streamer and the meeting bot without overriding the per-platform frame rate:
 
 ```bash
-docker compose -f dev.docker-compose.yaml -f dev.docker-compose.1080p60.yaml --profile webpage-streamer up
+docker compose -f dev.docker-compose.yaml -f dev.docker-compose.1080p.yaml --profile webpage-streamer up
 ```
 
 On Kubernetes the streamer container still requests 1 CPU and limits memory to 4Gi unless you set `WEBPAGE_STREAMING_CPU_REQUEST` (and optionally `WEBPAGE_STREAMING_CPU_LIMIT`) and `WEBPAGE_STREAMING_MEMORY_LIMIT`. Use 4 CPUs and 8Gi for 1080p.

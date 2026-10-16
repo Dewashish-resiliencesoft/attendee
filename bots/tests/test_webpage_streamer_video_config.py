@@ -262,16 +262,16 @@ class TestHiddenCapsRemovedFromSources(unittest.TestCase):
         # Streamer pod and meeting-bot pod both receive the configured size and fps.
         self.assertEqual(source.count("_webpage_streamer_env()"), 2)
 
-    def test_local_1080p60_override_and_docs(self):
-        override = (ROOT / "dev.docker-compose.1080p60.yaml").read_text()
+    def test_local_1080p_override_keeps_platform_fps(self):
+        override = (ROOT / "dev.docker-compose.1080p.yaml").read_text()
         self.assertIn("1920x1080", override)
-        self.assertIn("60", override)
         self.assertIn("cpus:", override)
+        self.assertNotIn("WEBPAGE_STREAMER_VIDEO_FPS", override)
+        self.assertNotIn("dev.docker-compose.1080p60.yaml", (ROOT / "README.md").read_text())
         example = (ROOT / ".env.webpage-streamer.example").read_text()
         self.assertIn("WEBPAGE_STREAMER_VIDEO_FRAME_SIZE=1920x1080", example)
-        self.assertIn("WEBPAGE_STREAMER_VIDEO_FPS=60", example)
         readme = (ROOT / "README.md").read_text()
-        self.assertIn("dev.docker-compose.1080p60.yaml", readme)
+        self.assertIn("dev.docker-compose.1080p.yaml", readme)
         self.assertIn("limits screen share to about 30 fps", readme)
 
 
