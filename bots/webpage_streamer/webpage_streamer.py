@@ -18,7 +18,14 @@ from aiortc.contrib.media import MediaRelay
 from av import AudioFrame, VideoFrame
 from pyvirtualdisplay import Display
 
-from bots.webpage_streamer_config import build_gstreamer_pipeline_description, default_fps_for_platform
+from bots.webpage_streamer_config import (
+    apply_vp8_encoder_settings,
+    build_gstreamer_pipeline_description,
+    capture_settings_from_offer,
+    default_fps_for_platform,
+    resolve_video_bitrate_kbps,
+    video_keyframe_interval_frames,
+)
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GstApp", "1.0")
@@ -197,6 +204,8 @@ class WebpageStreamer:
 
         logger.info("GStreamer capture pipeline is PLAYING")
 
+        self._install_vp8_encoder_settings()
+
         self._video_track = GstVideoStreamTrack(
             sink=self._gst_video_sink,
             width=width,
@@ -208,6 +217,38 @@ class WebpageStreamer:
             sample_rate=16000,
             channels=1,
         )
+
+    def _apply_offer_capture_settings(self, params):
+        """The local streamer starts without a meeting platform. The bot sends one on /offer."""
+        if self._gst_pipeline is not None:
+            return
+        frame_size, fps = capture_settings_from_offer(params, self.video_frame_size, self.video_fps)
+        self.video_frame_size = frame_size
+        self.video_fps = fps
+
+    def _install_vp8_encoder_settings(self):
+        """Point aiortc's VP8 encoder at the bitrate and keyframe interval for this capture."""
+        import aiortc.rtcrtpsender as sender_mod
+
+        width, height = self.video_frame_size
+        bitrate_bps = resolve_video_bitrate_kbps(width, height, self.video_fps) * 1000
+        keyframe_interval_frames = video_keyframe_interval_frames(self.video_fps)
+        current = sender_mod.get_encoder
+        if getattr(current, "_webpage_streamer_vp8", False):
+            current._bitrate_bps = bitrate_bps
+            current._keyframe_interval_frames = keyframe_interval_frames
+            return
+
+        def get_encoder(codec):
+            encoder = current(codec)
+            if type(encoder).__name__ == "Vp8Encoder":
+                apply_vp8_encoder_settings(encoder, get_encoder._bitrate_bps, get_encoder._keyframe_interval_frames)
+            return encoder
+
+        get_encoder._webpage_streamer_vp8 = True
+        get_encoder._bitrate_bps = bitrate_bps
+        get_encoder._keyframe_interval_frames = keyframe_interval_frames
+        sender_mod.get_encoder = get_encoder
 
     def _stop_gstreamer_capture(self):
         if self._gst_pipeline:
@@ -353,8 +394,10 @@ class WebpageStreamer:
             params = await req.json()
             offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
 
-            # Lazy-start capture so we don't accumulate latency before WebRTC is up
+            # Lazy-start capture so we don't accumulate latency before WebRTC is up.
+            # Apply the bot's platform/fps first so a Meet bot is not stuck at the local 60 fps default.
             if self._gst_pipeline is None:
+                self._apply_offer_capture_settings(params)
                 self._start_gstreamer_capture()
 
             pc = RTCPeerConnection()

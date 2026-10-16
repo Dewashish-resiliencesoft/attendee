@@ -183,9 +183,129 @@ def webpage_streamer_cli_args(platform=None, environ=None):
     ]
 
 
-def webpage_streaming_cpu_request(environ=None):
+# aiortc 1.10.1 src/aiortc/codecs/vpx.py defaults, which are too low for 1080p:
+#   DEFAULT_BITRATE = 500000          line 15 (500 kbps)
+#   MAX_BITRATE = 1500000             line 17 (the setter at line 372 clamps to this)
+#   Vp8Encoder.cfg.kf_max_dist = 3000 line 279 (3000 frames, about 100s at 30 fps)
+# 1920*1080*fps // 20736 is 3000 kbps at 30 fps and 6000 kbps at 60 fps.
+_PIXEL_FPS_PER_KBPS = 20736
+KEYFRAME_INTERVAL_SECONDS = 2
+
+
+def parse_video_bitrate_kbps(value):
+    """Parse a positive integer bitrate in kbps."""
+    return parse_video_fps(value)
+
+
+def default_video_bitrate_kbps(width, height, fps):
+    """Scale bitrate with pixels and frame rate. 1080p30 is 3 Mbps, 1080p60 is 6 Mbps."""
+    fps = parse_video_fps(fps)
+    if width < 2 or height < 2 or width % 2 or height % 2:
+        raise ValueError(f"Video frame size must be positive even width and height, got {width}x{height}")
+    return max(1, (width * height * fps) // _PIXEL_FPS_PER_KBPS)
+
+
+def resolve_video_bitrate_kbps(width, height, fps, environ=None):
+    """WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS, otherwise scale with resolution and fps."""
     env = os.environ if environ is None else environ
-    return env.get("WEBPAGE_STREAMING_CPU_REQUEST", "1")
+    raw = env.get("WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS", "").strip()
+    if raw:
+        return parse_video_bitrate_kbps(raw)
+    return default_video_bitrate_kbps(width, height, fps)
+
+
+def video_keyframe_interval_frames(fps):
+    """Keyframe about every 2 seconds. aiortc's default kf_max_dist is 3000 frames."""
+    return parse_video_fps(fps) * KEYFRAME_INTERVAL_SECONDS
+
+
+def capture_settings_from_offer(params, frame_size, fps, environ=None):
+    """Use platform or fps from the meeting bot's /offer when capture has not started."""
+    if not isinstance(params, dict):
+        return frame_size, fps
+    platform = params.get("platform")
+    video_fps = params.get("video_fps")
+    if platform in (None, "") and video_fps in (None, ""):
+        return frame_size, fps
+    resolved_fps = resolve_video_fps(
+        None if video_fps in (None, "") else video_fps,
+        platform=None if platform in (None, "") else platform,
+        environ=environ,
+    )
+    return frame_size, resolved_fps
+
+
+def _raise_vpx_bitrate_ceiling(bitrate_bps):
+    """aiortc clamps target_bitrate to MAX_BITRATE (vpx.py:17, applied at vpx.py:372)."""
+    try:
+        import aiortc.codecs.vpx as vpx
+    except ImportError:
+        return
+    if bitrate_bps > vpx.MAX_BITRATE:
+        vpx.MAX_BITRATE = bitrate_bps
+    if bitrate_bps < vpx.MIN_BITRATE:
+        vpx.MIN_BITRATE = bitrate_bps
+
+
+def _push_vpx_config(encoder):
+    codec = getattr(encoder, "codec", None)
+    cfg = getattr(encoder, "cfg", None)
+    if codec is None or cfg is None:
+        return
+    try:
+        from aiortc.codecs.vpx import _vpx_assert, lib
+    except ImportError:
+        return
+    try:
+        _vpx_assert(lib.vpx_codec_enc_config_set(codec, cfg))
+    except Exception:
+        return
+
+
+def apply_vp8_encoder_settings(encoder, bitrate_bps, keyframe_interval_frames):
+    """Override aiortc's 500 kbps / kf_max_dist=3000 defaults on one Vp8Encoder."""
+    bitrate_bps = int(bitrate_bps)
+    keyframe_interval_frames = int(keyframe_interval_frames)
+    _raise_vpx_bitrate_ceiling(bitrate_bps)
+    private_bitrate = "_Vp8Encoder__target_bitrate"
+    private_dirty = "_Vp8Encoder__update_config_needed"
+    if hasattr(encoder, private_bitrate):
+        setattr(encoder, private_bitrate, bitrate_bps)
+    if hasattr(encoder, private_dirty):
+        setattr(encoder, private_dirty, True)
+
+    original_encode = encoder.encode
+
+    def encode(frame, force_keyframe=False):
+        payloads, timestamp = original_encode(frame, force_keyframe)
+        cfg = getattr(encoder, "cfg", None)
+        if cfg is not None and getattr(cfg, "kf_max_dist", None) != keyframe_interval_frames:
+            cfg.kf_max_dist = keyframe_interval_frames
+            cfg.rc_target_bitrate = max(1, bitrate_bps // 1000)
+            _push_vpx_config(encoder)
+        return payloads, timestamp
+
+    encoder.encode = encode
+    return encoder
+
+
+def _bitrate_env_var(env):
+    raw = env.get("WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS", "").strip()
+    if not raw:
+        return []
+    return [("WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS", str(parse_video_bitrate_kbps(raw)))]
+
+
+def webpage_streaming_cpu_request(environ=None):
+    """Match dev.docker-compose.1080p.yaml (4 CPUs). Override with WEBPAGE_STREAMING_CPU_REQUEST."""
+    env = os.environ if environ is None else environ
+    return env.get("WEBPAGE_STREAMING_CPU_REQUEST", "4")
+
+
+def webpage_streaming_memory_request(environ=None):
+    """Match dev.docker-compose.1080p.yaml (8g). Override with WEBPAGE_STREAMING_MEMORY_REQUEST."""
+    env = os.environ if environ is None else environ
+    return env.get("WEBPAGE_STREAMING_MEMORY_REQUEST", "8Gi")
 
 
 def webpage_streaming_cpu_limit(environ=None):
@@ -198,7 +318,7 @@ def webpage_streaming_cpu_limit(environ=None):
 def webpage_streaming_resource_limits(environ=None):
     env = os.environ if environ is None else environ
     limits = {
-        "memory": env.get("WEBPAGE_STREAMING_MEMORY_LIMIT", "4Gi"),
+        "memory": env.get("WEBPAGE_STREAMING_MEMORY_LIMIT", "8Gi"),
         "ephemeral-storage": env.get("WEBPAGE_STREAMING_EPHEMERAL_STORAGE_LIMIT", "0.5Gi"),
     }
     cpu_limit = webpage_streaming_cpu_limit(environ=env)
@@ -217,4 +337,5 @@ def webpage_streamer_env_vars(platform=None, environ=None):
         ("WEBPAGE_STREAMER_PLATFORM", resolved_platform),
         ("WEBPAGE_STREAMER_VIDEO_FRAME_SIZE", format_video_frame_size(frame_size)),
         ("WEBPAGE_STREAMER_VIDEO_FPS", str(fps)),
+        *_bitrate_env_var(env),
     ]

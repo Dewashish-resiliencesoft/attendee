@@ -5,18 +5,25 @@ from unittest.mock import patch
 
 from bots.webpage_streamer_config import (
     DEFAULT_VIDEO_FRAME_SIZE,
+    apply_vp8_encoder_settings,
     build_gstreamer_pipeline_description,
+    capture_settings_from_offer,
     default_fps_for_platform,
     default_frame_size_for_platform,
+    default_video_bitrate_kbps,
     initial_data_webpage_streamer_js_fields,
     meeting_bot_output_rates,
     parse_video_fps,
     parse_video_frame_size,
+    resolve_video_bitrate_kbps,
     resolve_video_fps,
     resolve_video_frame_size,
+    video_keyframe_interval_frames,
     webpage_streamer_cli_args,
+    webpage_streamer_env_vars,
     webpage_streaming_cpu_limit,
     webpage_streaming_cpu_request,
+    webpage_streaming_memory_request,
     webpage_streaming_resource_limits,
 )
 
@@ -129,7 +136,7 @@ class TestGstreamerPipeline(unittest.TestCase):
         self.assertIn("videoscale", description)
         self.assertIn("display-name=:99", description)
 
-    def test_default_pipeline_stays_720p15(self):
+    def test_pipeline_uses_explicit_720p15(self):
         description = build_gstreamer_pipeline_description(display_var=":1", width=1280, height=720, framerate=15)
         self.assertIn("framerate=15/1", description)
         self.assertIn("width=1280", description)
@@ -216,11 +223,28 @@ class TestPodResources(unittest.TestCase):
         self.assertIn("1280x720", args)
         self.assertIn("24", args)
 
-    def test_cpu_request_default_stays_one(self):
+    def test_cpu_and_memory_defaults_match_1080p_compose(self):
         env = os.environ.copy()
         env.pop("WEBPAGE_STREAMING_CPU_REQUEST", None)
+        env.pop("WEBPAGE_STREAMING_MEMORY_REQUEST", None)
+        env.pop("WEBPAGE_STREAMING_MEMORY_LIMIT", None)
         with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(webpage_streaming_cpu_request(), "4")
+            self.assertEqual(webpage_streaming_memory_request(), "8Gi")
+            self.assertEqual(webpage_streaming_resource_limits()["memory"], "8Gi")
+
+    def test_cpu_and_memory_stay_env_overridable(self):
+        with patch.dict(
+            os.environ,
+            {
+                "WEBPAGE_STREAMING_CPU_REQUEST": "1",
+                "WEBPAGE_STREAMING_MEMORY_REQUEST": "4Gi",
+                "WEBPAGE_STREAMING_MEMORY_LIMIT": "4Gi",
+            },
+        ):
             self.assertEqual(webpage_streaming_cpu_request(), "1")
+            self.assertEqual(webpage_streaming_memory_request(), "4Gi")
+            self.assertEqual(webpage_streaming_resource_limits()["memory"], "4Gi")
 
     def test_cpu_limit_is_unset_by_default(self):
         env = os.environ.copy()
@@ -249,6 +273,10 @@ class TestHiddenCapsRemovedFromSources(unittest.TestCase):
         self.assertNotIn("captureStream(30)", source)
         self.assertIn("webpageStreamerVideoFps", source)
         self.assertIn("webpageStreamerCaptureFps", source)
+        self.assertIn("const WEBPAGE_STREAMER_FALLBACK_FPS = 60", source)
+        self.assertEqual(source.count("WEBPAGE_STREAMER_FALLBACK_FPS"), 3)
+        self.assertNotIn("|| 30", source)
+        self.assertNotIn("|| 60", source)
 
     def test_meeting_bot_receives_streamer_fps(self):
         source = (ROOT / "bots/web_bot_adapter/web_bot_adapter.py").read_text()
@@ -273,6 +301,89 @@ class TestHiddenCapsRemovedFromSources(unittest.TestCase):
         readme = (ROOT / "README.md").read_text()
         self.assertIn("dev.docker-compose.1080p.yaml", readme)
         self.assertIn("limits screen share to about 30 fps", readme)
+
+    def test_local_compose_passes_platform_to_streamer(self):
+        compose = (ROOT / "dev.docker-compose.yaml").read_text()
+        streamer = compose.split("attendee-webpage-streamer-local:", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("--platform ${WEBPAGE_STREAMER_PLATFORM:-local}", streamer)
+        self.assertIn("WEBPAGE_STREAMER_PLATFORM=${WEBPAGE_STREAMER_PLATFORM:-}", streamer)
+
+
+class TestVideoBitrate(unittest.TestCase):
+    def test_1080p30_is_3_mbps_and_1080p60_is_6_mbps(self):
+        self.assertEqual(default_video_bitrate_kbps(1920, 1080, 30), 3000)
+        self.assertEqual(default_video_bitrate_kbps(1920, 1080, 60), 6000)
+        self.assertGreaterEqual(default_video_bitrate_kbps(1920, 1080, 30), 2500)
+        self.assertLessEqual(default_video_bitrate_kbps(1920, 1080, 30), 4000)
+        self.assertGreaterEqual(default_video_bitrate_kbps(1920, 1080, 60), 5000)
+        self.assertLessEqual(default_video_bitrate_kbps(1920, 1080, 60), 8000)
+
+    def test_bitrate_scales_with_pixels_and_fps(self):
+        self.assertEqual(default_video_bitrate_kbps(1280, 720, 30) * 2, default_video_bitrate_kbps(1280, 720, 60))
+        self.assertLess(default_video_bitrate_kbps(1280, 720, 30), default_video_bitrate_kbps(1920, 1080, 30))
+
+    def test_env_bitrate_override(self):
+        with patch.dict(os.environ, {"WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS": "4500"}):
+            self.assertEqual(resolve_video_bitrate_kbps(1920, 1080, 60), 4500)
+
+    def test_unset_bitrate_uses_the_formula(self):
+        env = os.environ.copy()
+        env.pop("WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS", None)
+        with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(resolve_video_bitrate_kbps(1920, 1080, 30), 3000)
+
+    def test_keyframe_interval_is_about_two_seconds(self):
+        self.assertEqual(video_keyframe_interval_frames(30), 60)
+        self.assertEqual(video_keyframe_interval_frames(60), 120)
+
+    def test_offer_platform_selects_meet_fps(self):
+        _size, fps = capture_settings_from_offer({"platform": "google_meet"}, (1920, 1080), 60, environ={})
+        self.assertEqual(fps, 30)
+
+    def test_offer_fps_overrides_startup_default(self):
+        _size, fps = capture_settings_from_offer({"platform": "google_meet", "video_fps": 24}, (1920, 1080), 60, environ={})
+        self.assertEqual(fps, 24)
+
+    def test_offer_without_platform_keeps_startup_fps(self):
+        _size, fps = capture_settings_from_offer({"sdp": "v=0"}, (1920, 1080), 60, environ={})
+        self.assertEqual(fps, 60)
+
+    def test_apply_vp8_overrides_aiortc_defaults(self):
+        class Cfg:
+            def __init__(self):
+                self.kf_max_dist = 3000
+                self.rc_target_bitrate = 500
+
+        class Encoder:
+            def __init__(self):
+                self.cfg = None
+                self.codec = None
+                self._Vp8Encoder__target_bitrate = 500000
+                self._Vp8Encoder__update_config_needed = False
+
+            def encode(self, frame, force_keyframe=False):
+                self.cfg = Cfg()
+                self.cfg.rc_target_bitrate = self._Vp8Encoder__target_bitrate // 1000
+                self.codec = object()
+                return [b"ok"], 1
+
+        encoder = Encoder()
+        apply_vp8_encoder_settings(encoder, 3_000_000, 60)
+        self.assertEqual(encoder._Vp8Encoder__target_bitrate, 3_000_000)
+        encoder.encode(object(), False)
+        self.assertEqual(encoder.cfg.kf_max_dist, 60)
+        self.assertEqual(encoder.cfg.rc_target_bitrate, 3000)
+
+    def test_bitrate_override_is_forwarded_to_the_pod(self):
+        with patch.dict(os.environ, {"WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS": "4500"}):
+            env_vars = dict(webpage_streamer_env_vars(platform="zoom"))
+        self.assertEqual(env_vars["WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS"], "4500")
+
+    def test_streamer_installs_vp8_settings_from_the_offer(self):
+        source = (ROOT / "bots/webpage_streamer/webpage_streamer.py").read_text()
+        self.assertIn("capture_settings_from_offer", source)
+        self.assertIn("apply_vp8_encoder_settings", source)
+        self.assertIn("_apply_offer_capture_settings", source)
 
 
 if __name__ == "__main__":

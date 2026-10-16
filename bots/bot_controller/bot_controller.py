@@ -62,6 +62,7 @@ from bots.per_participant_realtime_video_configuration import (
 )
 from bots.webhook_payloads import chat_message_webhook_payload, participant_event_webhook_payload, utterance_webhook_payload
 from bots.webhook_utils import trigger_webhook
+from bots.webpage_streamer_config import resolve_video_fps
 from bots.websocket_payloads import mixed_audio_websocket_payload, per_participant_audio_websocket_payload, per_participant_video_websocket_payload
 from bots.zoom_oauth_connections_utils import get_zoom_tokens_via_zoom_oauth_app
 from bots.zoom_rtms_adapter.rtms_gstreamer_pipeline import RTMSGstreamerPipeline
@@ -997,6 +998,7 @@ class BotController:
 
         self.webpage_streamer_manager = None
         if self.bot_in_db.should_launch_webpage_streamer():
+            webpage_streamer_platform = meeting_type_from_url(self.bot_in_db.meeting_url) or "local"
             self.webpage_streamer_manager = WebpageStreamerManager(
                 is_bot_ready_for_webpage_streamer_callback=self.adapter.is_bot_ready_for_webpage_streamer,
                 get_peer_connection_offer_callback=self.adapter.webpage_streamer_get_peer_connection_offer,
@@ -1005,6 +1007,8 @@ class BotController:
                 stop_bot_output_media_stream_callback=self.adapter.webpage_streamer_stop_bot_output_media_stream,
                 on_message_that_webpage_streamer_connection_can_start_callback=self.on_message_that_webpage_streamer_connection_can_start,
                 webpage_streamer_service_hostname=self.bot_in_db.k8s_webpage_streamer_service_hostname(),
+                webpage_streamer_platform=webpage_streamer_platform,
+                video_fps=resolve_video_fps(None, platform=webpage_streamer_platform),
             )
             self.webpage_streamer_manager.init()
 

@@ -168,11 +168,12 @@ This document lists all supported environment variables for the Attendee applica
 | `WEBPAGE_STREAMER_POD_NAMESPACE` | String | `attendee-webpage-streamer` | Kubernetes namespace for webpage streamer pods. |
 | `WEBPAGE_STREAMER_VIDEO_FRAME_SIZE` | String | Platform default `1920x1080` | Webpage streamer capture size, `WIDTHxHEIGHT`. Overrides the per-platform default. Width and height must be positive even integers. |
 | `WEBPAGE_STREAMER_VIDEO_FPS` | Integer | Platform default: Google Meet `30`, Zoom / Teams / local `60` | Webpage streamer capture frame rate. Overrides the per-platform default. Google Meet still shows screen share to viewers at about 30 fps. |
+| `WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS` | Integer | Scaled: 1080p30 `3000`, 1080p60 `6000` | VP8 target bitrate in kbps. Unset scales with resolution and fps. Keyframes are about every 2 seconds. |
 | `WEBPAGE_STREAMER_PLATFORM` | String | `local` | Platform used to pick the size/fps default when the bot's meeting URL is not available (`google_meet`, `zoom`, `teams`, `local`). |
-| `WEBPAGE_STREAMING_CPU_REQUEST` | String | `1` | Kubernetes CPU request for the webpage streamer container. Raise this (for example to `4`) for 1920x1080 at 30 or 60 fps. |
+| `WEBPAGE_STREAMING_CPU_REQUEST` | String | `4` | Kubernetes CPU request for the webpage streamer container. |
 | `WEBPAGE_STREAMING_CPU_LIMIT` | String | (None) | Optional Kubernetes CPU limit for the webpage streamer container. Unset means no CPU limit. |
-| `WEBPAGE_STREAMING_MEMORY_REQUEST` | String | `4Gi` | Kubernetes memory request for the webpage streamer container. |
-| `WEBPAGE_STREAMING_MEMORY_LIMIT` | String | `4Gi` | Kubernetes memory limit for the webpage streamer container. 1080p capture often needs `8Gi`. |
+| `WEBPAGE_STREAMING_MEMORY_REQUEST` | String | `8Gi` | Kubernetes memory request for the webpage streamer container. |
+| `WEBPAGE_STREAMING_MEMORY_LIMIT` | String | `8Gi` | Kubernetes memory limit for the webpage streamer container. |
 | `CHARGE_CREDITS_FOR_BOTS` | Boolean | `false` | Enable credit charging for bot operations. |
 | `CUSTOM_BOT_POD_SPEC_TYPES` | String | (Empty) | Comma-separated list of custom bot pod specification types. |
 | `ENFORCE_DOMAIN_ALLOWLIST_IN_CHROME` | Boolean | `false` | Enforce domain allowlist in Chrome web bot. |

@@ -58,14 +58,16 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=attendee.settings.development
       - ENABLE_CHROME_SANDBOX=true
-      # Unset size/fps fall through to the local default: 1920x1080 @ 60fps.
-      # Set WEBPAGE_STREAMER_VIDEO_FRAME_SIZE / WEBPAGE_STREAMER_VIDEO_FPS to override.
+      # Unset size/fps fall through to the platform default. The meeting bot also
+      # sends platform and fps on /offer so a Meet bot captures at 30, not 60.
+      - WEBPAGE_STREAMER_PLATFORM=${WEBPAGE_STREAMER_PLATFORM:-}
       - WEBPAGE_STREAMER_VIDEO_FRAME_SIZE=${WEBPAGE_STREAMER_VIDEO_FRAME_SIZE:-}
       - WEBPAGE_STREAMER_VIDEO_FPS=${WEBPAGE_STREAMER_VIDEO_FPS:-}
-    # 1080p60 capture needs more than the Kubernetes pod's 1 CPU request.
+      - WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS=${WEBPAGE_STREAMER_VIDEO_BITRATE_KBPS:-}
+    # Same 4 CPU / 8g budget as the Kubernetes webpage-streamer pod.
     cpus: "4"
     mem_limit: 8g
-    command: "python bots/webpage_streamer/run_webpage_streamer.py"
+    command: "python bots/webpage_streamer/run_webpage_streamer.py --platform ${WEBPAGE_STREAMER_PLATFORM:-local}"
     security_opt:
       - seccomp=./bots/web_bot_adapter/chrome_seccomp.json
     profiles:

@@ -18,6 +18,8 @@ class WebpageStreamerManager:
         stop_bot_output_media_stream_callback,
         on_message_that_webpage_streamer_connection_can_start_callback,
         webpage_streamer_service_hostname,
+        webpage_streamer_platform=None,
+        video_fps=None,
     ):
         self.url = None
         self.last_non_empty_url = None
@@ -26,6 +28,8 @@ class WebpageStreamerManager:
         self.start_peer_connection_callback = start_peer_connection_callback
         self.cleaned_up = False
         self.webpage_streamer_service_hostname = webpage_streamer_service_hostname
+        self.webpage_streamer_platform = webpage_streamer_platform
+        self.video_fps = video_fps
         self.is_bot_ready_for_webpage_streamer_callback = is_bot_ready_for_webpage_streamer_callback
         self.play_bot_output_media_stream_callback = play_bot_output_media_stream_callback
         self.stop_bot_output_media_stream_callback = stop_bot_output_media_stream_callback
@@ -114,7 +118,12 @@ class WebpageStreamerManager:
             logger.error(f"Error getting peer connection offer: {peerConnectionOffer.get('error')}, returning")
             return
 
-        offer_response = requests.post(f"http://{self.streaming_service_hostname()}:8000/offer", json={"sdp": peerConnectionOffer["sdp"], "type": peerConnectionOffer["type"]})
+        offer_payload = {"sdp": peerConnectionOffer["sdp"], "type": peerConnectionOffer["type"]}
+        if self.webpage_streamer_platform:
+            offer_payload["platform"] = self.webpage_streamer_platform
+        if self.video_fps:
+            offer_payload["video_fps"] = self.video_fps
+        offer_response = requests.post(f"http://{self.streaming_service_hostname()}:8000/offer", json=offer_payload)
         logger.info(f"Offer response: {offer_response.json()}")
         self.start_peer_connection_callback(offer_response.json())
 

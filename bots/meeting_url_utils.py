@@ -161,11 +161,11 @@ def normalize_meeting_url_raw(url):
 
         return MeetingTypes.ZOOM, normalized_url
 
-    # Check if it's a Google Meet URL
-    if domain_and_subdomain == "meet.google.com":
-        # Use regex to extract the meeting code from Google Meet URL
-        # Meeting code is the part after meet.google.com/
-        google_meet_match = re.search(r"meet\.google\.com/([a-zA-Z0-9-]+)", url)
+    # Check if it's a Google Meet URL. Host match is case-insensitive and allows subdomains.
+    meet_host = (domain_and_subdomain or "").lower()
+    if meet_host == "meet.google.com" or meet_host.endswith(".meet.google.com"):
+        # Meeting code is the part after meet.google.com/. Query strings stay out of the code.
+        google_meet_match = re.search(r"meet\.google\.com/([a-zA-Z0-9-]+)", url, re.IGNORECASE)
         if google_meet_match:
             meeting_code = google_meet_match.group(1)
             normalized_url = f"https://meet.google.com/{meeting_code}"

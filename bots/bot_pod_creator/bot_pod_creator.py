@@ -10,7 +10,7 @@ import jsonpatch
 from django.conf import settings
 from kubernetes import client, config
 
-from bots.webpage_streamer_config import webpage_streamer_cli_args, webpage_streamer_env_vars, webpage_streaming_cpu_request, webpage_streaming_resource_limits
+from bots.webpage_streamer_config import webpage_streamer_cli_args, webpage_streamer_env_vars, webpage_streaming_cpu_request, webpage_streaming_memory_request, webpage_streaming_resource_limits
 
 from .bot_pod_spec import BotPodSpecType
 
@@ -223,7 +223,7 @@ class BotPodCreator:
                 resources=client.V1ResourceRequirements(
                     requests={
                         "cpu": webpage_streaming_cpu_request(),
-                        "memory": os.getenv("WEBPAGE_STREAMING_MEMORY_REQUEST", "4Gi"),
+                        "memory": webpage_streaming_memory_request(),
                         "ephemeral-storage": os.getenv("WEBPAGE_STREAMING_EPHEMERAL_STORAGE_REQUEST", "0.5Gi")
                     },
                     limits=webpage_streaming_resource_limits(),

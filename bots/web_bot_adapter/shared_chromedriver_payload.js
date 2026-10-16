@@ -1,3 +1,7 @@
+// Fallback when the meeting bot did not inject webpageStreamerVideoFps / webpageStreamerCaptureFps.
+// One value for the draw loop and captureStream. 60 stays above Google Meet's 30 fps floor.
+const WEBPAGE_STREAMER_FALLBACK_FPS = 60;
+
 // Holds the state of a bot video output stream. We need this class because there are two bot video output streams, one for webcam and one for screenshare.
 class BotVideoOutputStream {
     constructor({
@@ -32,9 +36,8 @@ class BotVideoOutputStream {
         this.canvasCtx.fillStyle = "black";
         this.canvasCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // At least 30 on Google Meet (Meet rejects slower tracks). Raised when the
-        // streamer fps is higher so this is not a hidden cap. Injected per platform.
-        const captureFps = (window.initialData && Number(window.initialData.webpageStreamerCaptureFps)) || 30;
+        // At least 30 on Google Meet (Meet rejects slower tracks). Injected per platform.
+        const captureFps = (window.initialData && Number(window.initialData.webpageStreamerCaptureFps)) || WEBPAGE_STREAMER_FALLBACK_FPS;
         const sourceVideoStream = this.canvas.captureStream(captureFps);
 
         // This is our *source* video track; we will CLONE it for callers.
@@ -451,7 +454,7 @@ class BotVideoOutputStream {
             this.ensureInputOn();
             this.ensureMicOn();
 
-            const streamerFps = (window.initialData && Number(window.initialData.webpageStreamerVideoFps)) || 60;
+            const streamerFps = (window.initialData && Number(window.initialData.webpageStreamerVideoFps)) || WEBPAGE_STREAMER_FALLBACK_FPS;
             this._startVideoDrawingLoop(streamerFps);
         }
         catch (e) {
